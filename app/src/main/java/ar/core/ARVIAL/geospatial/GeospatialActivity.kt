@@ -202,7 +202,7 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
     private val modelViewMatrix = FloatArray(16) // view x model
     private val modelViewProjectionMatrix = FloatArray(16) // projection x view x model
 
-    private val identityQuaternion = floatArrayOf(0f, 0f, 0f, 1f)
+
 
     // Locks needed for synchronization
     private val singleTapLock = Any()
@@ -725,7 +725,7 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
             }
         }
         synchronized(anchorsLock) {
-            if (anchors.size >= MAXIMUM_ANCHORS) {
+            if (anchorManager.sortedAnchors.size >= MAXIMUM_ANCHORS) {
                 runOnUiThread {
                     setAnchorButton!!.visibility = View.INVISIBLE
                     tapScreenTextView!!.visibility = View.INVISIBLE
@@ -1027,10 +1027,10 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
         ) {
             state = State.LOCALIZED
             synchronized(anchorsLock) {
-                val anchorNum = anchors.size
-                if (anchorNum == 0) {
-                    createAnchorFromSharedPreferences(earth)
-                }
+                val anchorNum = anchorManager.sortedAnchors.size
+//                if (anchorNum == 0) {
+//                    createAnchorFromSharedPreferences(earth)
+//                }
                 if (anchorNum < MAXIMUM_ANCHORS) {
                     runOnUiThread {
                         setAnchorButton!!.visibility = View.VISIBLE
@@ -1082,13 +1082,7 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
         }
 
         // TODO - Update anchors to only work with close ones to avoid overloading ARCore
-        val onlyCloseAnchors = true
-        if (onlyCloseAnchors) {
-            onlyCloseAnchors(10.0f, Pair(earth.cameraGeospatialPose.latitude, earth.cameraGeospatialPose.longitude), anchors)
-            // 2 places where I have to cut on the anchors, the current class and ARCore
-            anchors // List of anchors in current class
-            earth.anchors // List of anchors in ARCore
-        }
+
         updateGeospatialPoseText(geospatialPose)
     }
 
@@ -1161,22 +1155,23 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
         val longitude = geospatialPose.longitude
         val altitude = geospatialPose.altitude
         val quaternion = geospatialPose.eastUpSouthQuaternion
-        when (anchorType) {
-            AnchorType.TERRAIN -> {
-                createTerrainAnchor(earth, latitude, longitude, identityQuaternion)
-                storeAnchorParameters(latitude, longitude, 0.0, identityQuaternion)
-            }
-
-            AnchorType.GEOSPATIAL -> {
-                createAnchor(earth, latitude, longitude, altitude, quaternion)
-                storeAnchorParameters(latitude, longitude, altitude, quaternion)
-            }
-
-            AnchorType.ROOFTOP -> {
-                createRooftopAnchor(earth, latitude, longitude, identityQuaternion)
-                storeAnchorParameters(latitude, longitude, 0.0, identityQuaternion)
-            }
-        }
+//        when (anchorType) {
+//            AnchorType.TERRAIN -> {
+//                createTerrainAnchor(earth, latitude, longitude, identityQuaternion)
+//                storeAnchorParameters(latitude, longitude, 0.0, identityQuaternion)
+//            }
+//
+//            AnchorType.GEOSPATIAL -> {
+//
+//                storeAnchorParameters(latitude, longitude, altitude, quaternion)
+//            }
+//
+//            AnchorType.ROOFTOP -> {
+//                createRooftopAnchor(earth, latitude, longitude, identityQuaternion)
+//                storeAnchorParameters(latitude, longitude, 0.0, identityQuaternion)
+//            }
+//        }
+        createAnchor(earth, latitude, longitude, altitude, quaternion)
         runOnUiThread {
             clearAnchorsButton!!.visibility = View.VISIBLE
         }
@@ -1190,7 +1185,7 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
      */
     private fun handleClearAnchorsButton() {
         synchronized(anchorsLock) {
-            clearedAnchorsAmount = anchors.size
+            clearedAnchorsAmount = anchorManager.sortedAnchors.size
             val message =
                 resources
                     .getQuantityString(
@@ -1202,12 +1197,8 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
             statusTextView!!.visibility = View.VISIBLE
             statusTextView!!.text = message
 
-            for (anchor in anchors) {
-                anchor.detach()
-            }
-            anchors.clear()
+            anchorManager.removeAllAnchors()
         }
-        clearAnchorsFromSharedPreferences()
         clearAnchorsButton!!.visibility = View.INVISIBLE
         setAnchorButton!!.visibility = View.VISIBLE
         tapScreenTextView!!.visibility = View.VISIBLE
@@ -1223,166 +1214,82 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
     private fun createAnchor(
         earth: Earth, latitude: Double, longitude: Double, altitude: Double, quaternion: FloatArray
     ) {
-        val anchor =
-            earth.createAnchor(
-                latitude,
-                longitude,
-                altitude,
-                quaternion[0],
-                quaternion[1],
-                quaternion[2],
-                quaternion[3]
-            )
+
         Log.d(
             "Anchorrrr!",
-            latitude.toString() + ", " + longitude + ", " + altitude + ", " + quaternion[0] + ", " + quaternion[1] + ", " + quaternion[2] + ", " + quaternion[3]
+            latitude.toString() + ", " + longitude + ", " + altitude + ", " +
+                    quaternion[0] + ", " + quaternion[1] + ", " + quaternion[2] + ", " + quaternion[3]
         )
 
-        //    42.17013358337541-8.690065687532542486.0568971633911[5.6225293E-8, -0.36064374, -1.4483432E-7, 0.9327036]
         synchronized(anchorsLock) {
-            anchors.add(anchor)
-        }
-    }
-
-    //  private String anchorDescription(Anchor anchor) {
-    //    return anchor.getPose().
-    //  }
-    /** Create a terrain anchor at a specific geodetic location using a EUS quaternion.  */
-    private fun createTerrainAnchor(
-        earth: Earth, latitude: Double, longitude: Double, quaternion: FloatArray
-    ) {
-        val future =
-            earth.resolveAnchorOnTerrainAsync(
-                latitude,
-                longitude,  /* altitudeAboveTerrain= */
-                0.0,
-                quaternion[0],
-                quaternion[1],
-                quaternion[2],
-                quaternion[3]
-            ) { anchor: Anchor, state: TerrainAnchorState ->
-                if (state == TerrainAnchorState.SUCCESS) {
-                    synchronized(anchorsLock) {
-                        anchors.add(anchor)
-                        terrainAnchors.add(anchor)
-                    }
-                } else {
-                    statusTextView!!.visibility = View.VISIBLE
-                    statusTextView!!.text = getString(R.string.status_terrain_anchor, state)
-                }
-            }
-    }
-
-    /** Create a rooftop anchor at a specific geodetic location using a EUS quaternion.  */
-    private fun createRooftopAnchor(
-        earth: Earth, latitude: Double, longitude: Double, quaternion: FloatArray
-    ) {
-        val future =
-            earth.resolveAnchorOnRooftopAsync(
-                latitude,
-                longitude,  /* altitudeAboveRooftop= */
-                0.0,
-                quaternion[0],
-                quaternion[1],
-                quaternion[2],
-                quaternion[3]
-            ) { anchor: Anchor, state: RooftopAnchorState ->
-                if (state == RooftopAnchorState.SUCCESS) {
-                    synchronized(anchorsLock) {
-                        anchors.add(anchor)
-                        rooftopAnchors.add(anchor)
-                    }
-                } else {
-                    statusTextView!!.visibility = View.VISIBLE
-                    statusTextView!!.text = getString(R.string.status_rooftop_anchor, state)
-                }
-            }
-    }
-
-    /**
-     * Helper function to store the parameters used in anchor creation in [SharedPreferences].
-     */
-    private fun storeAnchorParameters(
-        latitude: Double, longitude: Double, altitude: Double, quaternion: FloatArray
-    ) {
-        val anchorParameterSet =
-            sharedPreferences!!.getStringSet(SHARED_PREFERENCES_SAVED_ANCHORS, HashSet())!!
-        val newAnchorParameterSet = HashSet(anchorParameterSet)
-
-        val editor = sharedPreferences!!.edit()
-        var type = ""
-        type = when (anchorType) {
-            AnchorType.TERRAIN -> "Terrain"
-            AnchorType.ROOFTOP -> "Rooftop"
-            else -> ""
-        }
-        newAnchorParameterSet.add(
-            String.format(
-                "$type%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f",
-                latitude,
+            anchorManager.setLocationAsAnchor(
+                Coords(latitude,
                 longitude,
-                altitude,
+                altitude),
+                earth,
                 quaternion[0],
                 quaternion[1],
                 quaternion[2],
-                quaternion[3]
-            )
-        )
-        editor.putStringSet(SHARED_PREFERENCES_SAVED_ANCHORS, newAnchorParameterSet)
-        editor.commit()
-    }
-
-
-    /** Creates all anchors that were stored in the [SharedPreferences].  */
-    private fun createAnchorFromSharedPreferences(earth: Earth) {
-        val anchorParameterSet =
-            sharedPreferences!!.getStringSet(
-                SHARED_PREFERENCES_SAVED_ANCHORS,
-                null
-            )
-                ?: return
-
-        for (anchorParameters in anchorParameterSet) {
-            var anchorParameters = anchorParameters
-            var type = AnchorType.GEOSPATIAL
-            if (anchorParameters.contains("Terrain")) {
-                type = AnchorType.TERRAIN
-                anchorParameters = anchorParameters.replace("Terrain", "")
-            } else if (anchorParameters.contains("Rooftop")) {
-                type = AnchorType.ROOFTOP
-                anchorParameters = anchorParameters.replace("Rooftop", "")
-            }
-            val parameters: Array<String> =
-                anchorParameters.split(",".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()
-            if (parameters.size != 7) {
-                Log.d(
-                    TAG,
-                    "Invalid number of anchor parameters. Expected four, found " + parameters.size
-                )
-                continue
-            }
-            val latitude: Double = parameters[0].toDouble()
-            val longitude: Double = parameters[1].toDouble()
-            val altitude: Double = parameters[2].toDouble()
-            val quaternion =
-                floatArrayOf(
-                    parameters[3].toFloat(),
-                    parameters[4].toFloat(),
-                    parameters[5].toFloat(),
-                    parameters[6].toFloat()
-                )
-            when (type) {
-                AnchorType.TERRAIN -> createTerrainAnchor(earth, latitude, longitude, quaternion)
-                AnchorType.ROOFTOP -> createRooftopAnchor(earth, latitude, longitude, quaternion)
-                else -> createAnchor(earth, latitude, longitude, altitude, quaternion)
-            }
-        }
-
-        runOnUiThread {
-            clearAnchorsButton!!.visibility =
-                View.VISIBLE
+                quaternion[3])
         }
     }
+
+//    //  private String anchorDescription(Anchor anchor) {
+//    //    return anchor.getPose().
+//    //  }
+//    /** Create a terrain anchor at a specific geodetic location using a EUS quaternion.  */
+//    private fun createTerrainAnchor(
+//        earth: Earth, latitude: Double, longitude: Double, quaternion: FloatArray
+//    ) {
+//        val future =
+//            earth.resolveAnchorOnTerrainAsync(
+//                latitude,
+//                longitude,  /* altitudeAboveTerrain= */
+//                0.0,
+//                quaternion[0],
+//                quaternion[1],
+//                quaternion[2],
+//                quaternion[3]
+//            ) { anchor: Anchor, state: TerrainAnchorState ->
+//                if (state == TerrainAnchorState.SUCCESS) {
+//                    synchronized(anchorsLock) {
+//                        anchors.add(anchor)
+//                        terrainAnchors.add(anchor)
+//                    }
+//                } else {
+//                    statusTextView!!.visibility = View.VISIBLE
+//                    statusTextView!!.text = getString(R.string.status_terrain_anchor, state)
+//                }
+//            }
+//    }
+//
+//    /** Create a rooftop anchor at a specific geodetic location using a EUS quaternion.  */
+//    private fun createRooftopAnchor(
+//        earth: Earth, latitude: Double, longitude: Double, quaternion: FloatArray
+//    ) {
+//        val future =
+//            earth.resolveAnchorOnRooftopAsync(
+//                latitude,
+//                longitude,  /* altitudeAboveRooftop= */
+//                0.0,
+//                quaternion[0],
+//                quaternion[1],
+//                quaternion[2],
+//                quaternion[3]
+//            ) { anchor: Anchor, state: RooftopAnchorState ->
+//                if (state == RooftopAnchorState.SUCCESS) {
+//                    synchronized(anchorsLock) {
+//                        anchors.add(anchor)
+//                        rooftopAnchors.add(anchor)
+//                    }
+//                } else {
+//                    statusTextView!!.visibility = View.VISIBLE
+//                    statusTextView!!.text = getString(R.string.status_rooftop_anchor, state)
+//                }
+//            }
+//    }
+
+
 
     override fun onDialogPositiveClick(dialog: DialogFragment) {
         if (!sharedPreferences!!.edit().putBoolean(ALLOW_GEOSPATIAL_ACCESS_KEY, true).commit()) {
@@ -1416,7 +1323,7 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
         // compared to frame rate.
         synchronized(singleTapLock) {
             synchronized(anchorsLock) {
-                if (queuedSingleTap == null || anchors.size >= MAXIMUM_ANCHORS || cameraTrackingState != TrackingState.TRACKING) {
+                if (queuedSingleTap == null || anchorManager.sortedAnchors.size >= MAXIMUM_ANCHORS || cameraTrackingState != TrackingState.TRACKING) {
                     queuedSingleTap = null
                     return
                 }
@@ -1460,7 +1367,7 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
     companion object {
         private val TAG: String = GeospatialActivity::class.java.getSimpleName()
 
-        private const val SHARED_PREFERENCES_SAVED_ANCHORS = "SHARED_PREFERENCES_SAVED_ANCHORS"
+        const val SHARED_PREFERENCES_SAVED_ANCHORS = "SHARED_PREFERENCES_SAVED_ANCHORS"
         private const val ALLOW_GEOSPATIAL_ACCESS_KEY = "ALLOW_GEOSPATIAL_ACCESS"
         private const val ANCHOR_MODE = "ANCHOR_MODE"
 

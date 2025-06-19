@@ -4,7 +4,6 @@ import com.google.ar.core.Anchor
 import com.google.ar.core.Earth
 import android.location.Location
 
-
 data class Coords(val lat: Double, val lon: Double, val alt: Double = 0.0)
 
 class AnchorManager() {
@@ -54,7 +53,7 @@ class AnchorManager() {
     //      -1.4483432E-7f,
     //      0.9327036f
     val defaultQuaternion = floatArrayOf(5.6225293E-8f, -0.36064374f, -1.4483432E-7f, 0.9327036f)
-
+    private val identityQuaternion = floatArrayOf(0f, 0f, 0f, 1f)
 
     // Para añadir una anchor a ARCore
     //      earth.createAnchor(lat, lon, alt, qx, qy, qz, qw)
@@ -82,6 +81,12 @@ class AnchorManager() {
     fun setLocationAsAnchor(location:Coords, earth: Earth) {
         val anchor = earth.createAnchor(location.lat, location.lon, location.alt,
             defaultQuaternion[0],defaultQuaternion[1],defaultQuaternion[2],defaultQuaternion[3])
+        setAnchors[location] = anchor
+    }
+
+    fun setLocationAsAnchor(location:Coords, earth: Earth, qx:Float, qy:Float, qz:Float, qw:Float) {
+        val anchor = earth.createAnchor(location.lat, location.lon, location.alt,
+            qx, qy, qz, qw)
         setAnchors[location] = anchor
     }
 
@@ -170,4 +175,8 @@ class AnchorManager() {
         }
     }
 }
+
+
+
+
 
