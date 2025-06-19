@@ -98,7 +98,10 @@ import kotlin.math.sqrt
 class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
     VpsAvailabilityNoticeDialogFragment.NoticeDialogListener,
     PrivacyNoticeDialogFragment.NoticeDialogListener {
-    // Rendering. The Renderers are created here, and initialized when the GL surface is created.
+
+    private var anchorManager = AnchorManager()
+
+        // Rendering. The Renderers are created here, and initialized when the GL surface is created.
     private lateinit var surfaceView: GLSurfaceView
 
     private var installRequested = false
@@ -187,7 +190,7 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
     private val anchorsLock = Any()
 
     @GuardedBy("anchorsLock")
-    private val anchors: MutableList<Anchor> = ArrayList()
+//    private val anchors: MutableList<Anchor> = ArrayList()
 
     private val terrainAnchors: MutableSet<Anchor> = HashSet()
     private val rooftopAnchors: MutableSet<Anchor> = HashSet()
@@ -401,7 +404,8 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
 
 
             // MY ANCHORS -------------------------------------------------------------
-            anchors.addAll(anchorList(earth!!))
+//            anchors.addAll(anchorList(earth!!))
+            anchorManager.anchorAllLocations(earth!!)
 
         } catch (e: CameraNotAvailableException) {
             message = "Camera not available. Try restarting the app."
@@ -822,8 +826,31 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
         render.clear(virtualSceneFramebuffer, 0f, 0f, 0f, 0f)
         synchronized(anchorsLock) {
             // TODO - Update anchors related to location
+
+            // REMOVE ALL ANCHORS
+
+            // 3 Places:
+            //  (1) The list,
+            //  (2) In ARCore need to call anchor.detach()
+            //  (3) Shared preferences - TODO
+
+
+            // ADD CLOSEST ANCHORS
+
+            // Anchors do not have lat, lon, alt (need to be recalculated)
+            //  (a) Recalculate them
+            //      val geospatialPose = arSession.earth.getGeospatialPose(anchor.pose)
+            //      geospatialPose.latitude, geospatialPose.longitude, geospatialPose.altitude
+            //  (b) Have a different data structure lined to the anchors where I save lat, lon, alt
+
+
             // session.earth.cameraGeospatialPose.latitude
-            for (anchor in anchors) {
+            anchorManager.onlyCloseAnchors(
+                earth?.cameraGeospatialPose!!.latitude,
+                earth.cameraGeospatialPose.longitude,
+                20.0, 20)
+
+            for ((_, _, anchor) in anchorManager.sortedAnchors) {
                 // Get the current pose of an Anchor in world space. The Anchor pose is updated
                 // during calls to session.update() as ARCore refines its estimate of the world.
                 // Only render resolved Terrain & Rooftop anchors and Geospatial anchors.
@@ -878,13 +905,13 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
                     )
                 }
             }
-            if (!anchors.isEmpty()) {
+            if (!anchorManager.sortedAnchors.isEmpty()) {
                 val anchorMessage =
                     resources
                         .getQuantityString(
                             R.plurals.status_anchors_set,
-                            anchors.size,
-                            anchors.size,
+                            anchorManager.sortedAnchors.size,
+                            anchorManager.sortedAnchors.size,
                             MAXIMUM_ANCHORS
                         )
                 runOnUiThread {
@@ -1057,7 +1084,7 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
         // TODO - Update anchors to only work with close ones to avoid overloading ARCore
         val onlyCloseAnchors = true
         if (onlyCloseAnchors) {
-            onlyCloseAnchors(10.0f, earth.cameraGeospatialPose.latitude, earth.cameraGeospatialPose.longitude, anchors)
+            onlyCloseAnchors(10.0f, Pair(earth.cameraGeospatialPose.latitude, earth.cameraGeospatialPose.longitude), anchors)
             // 2 places where I have to cut on the anchors, the current class and ARCore
             anchors // List of anchors in current class
             earth.anchors // List of anchors in ARCore
@@ -1158,6 +1185,9 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
         }
     }
 
+    /**
+     * Removes all anchors in ARCore
+     */
     private fun handleClearAnchorsButton() {
         synchronized(anchorsLock) {
             clearedAnchorsAmount = anchors.size
@@ -1181,6 +1211,12 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
         clearAnchorsButton!!.visibility = View.INVISIBLE
         setAnchorButton!!.visibility = View.VISIBLE
         tapScreenTextView!!.visibility = View.VISIBLE
+    }
+
+    private fun clearAnchorsFromSharedPreferences() {
+        val editor = sharedPreferences!!.edit()
+        editor.putStringSet(SHARED_PREFERENCES_SAVED_ANCHORS, null)
+        editor.commit()
     }
 
     /** Create an anchor at a specific geodetic location using a EUS quaternion.  */
@@ -1296,11 +1332,6 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
         editor.commit()
     }
 
-    private fun clearAnchorsFromSharedPreferences() {
-        val editor = sharedPreferences!!.edit()
-        editor.putStringSet(SHARED_PREFERENCES_SAVED_ANCHORS, null)
-        editor.commit()
-    }
 
     /** Creates all anchors that were stored in the [SharedPreferences].  */
     private fun createAnchorFromSharedPreferences(earth: Earth) {
