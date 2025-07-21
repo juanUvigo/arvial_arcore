@@ -16,6 +16,7 @@
 package ar.core.ARVIAL.geospatial
 
 import android.content.SharedPreferences
+import android.graphics.RenderEffect.createBlurEffect
 import android.opengl.GLSurfaceView
 import android.opengl.Matrix
 import android.os.Bundle
@@ -32,13 +33,70 @@ import android.widget.PopupMenu
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardColors
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RenderEffect
+import androidx.compose.ui.graphics.asComposeRenderEffect
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.fragment.app.DialogFragment
+import androidx.lifecycle.lifecycleScope
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import com.google.ar.core.Anchor
-import com.google.ar.core.Anchor.RooftopAnchorState
-import com.google.ar.core.Anchor.TerrainAnchorState
 import com.google.ar.core.ArCoreApk
 import com.google.ar.core.ArCoreApk.InstallStatus
 import com.google.ar.core.Config
@@ -64,6 +122,7 @@ import ar.core.ARVIAL.common.samplerender.IndexBuffer
 import ar.core.ARVIAL.common.samplerender.Mesh
 import ar.core.ARVIAL.common.samplerender.SampleRender
 import ar.core.ARVIAL.common.samplerender.Shader
+//import ar.core.ARVIAL.common.samplerender.Shader
 import ar.core.ARVIAL.common.samplerender.Shader.BlendFactor
 import ar.core.ARVIAL.common.samplerender.Texture
 import ar.core.ARVIAL.common.samplerender.VertexBuffer
@@ -79,6 +138,7 @@ import com.google.ar.core.exceptions.UnavailableSdkTooOldException
 import com.google.ar.core.exceptions.UnavailableUserDeclinedInstallationException
 import com.google.ar.core.exceptions.UnsupportedConfigurationException
 import com.google.errorprone.annotations.concurrent.GuardedBy
+import kotlinx.coroutines.launch
 import java.io.IOException
 import java.util.ArrayList
 import java.util.concurrent.TimeUnit
@@ -86,6 +146,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.sqrt
+import android.graphics.Color as OldColor
 
 /**
  * Main activity for the Geospatial API example.
@@ -95,9 +156,7 @@ import kotlin.math.sqrt
  * be created at the device's geospatial location. Anchor locations are persisted across sessions
  * and will be recreated once localized.
  */
-class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
-    VpsAvailabilityNoticeDialogFragment.NoticeDialogListener,
-    PrivacyNoticeDialogFragment.NoticeDialogListener {
+class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer {
 
     private var anchorManager = AnchorManager()
 
@@ -165,12 +224,8 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
     private var sharedPreferences: SharedPreferences? = null
 
     private var lastStatusText: String? = null
-    private var geospatialPoseTextView: TextView? = null
     private var statusTextView: TextView? = null
-    private var tapScreenTextView: TextView? = null
-    private lateinit var setAnchorButton: Button
     private var clearAnchorsButton: Button? = null
-    private var streetscapeGeometrySwitch: Switch? = null
 
     private var planeRenderer: PlaneRenderer? = null
     private var backgroundRenderer: BackgroundRenderer? = null
@@ -202,8 +257,6 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
     private val modelViewMatrix = FloatArray(16) // view x model
     private val modelViewProjectionMatrix = FloatArray(16) // projection x view x model
 
-
-
     // Locks needed for synchronization
     private val singleTapLock = Any()
 
@@ -234,47 +287,26 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
     // A set of planes representing building outlines and floors.
     private val streetscapeGeometryToMeshes: MutableMap<StreetscapeGeometry, Mesh> = HashMap()
 
+    private val geospatialViewModel: GeospatialViewModel by viewModels()
+
+    // COMPOSE
+    private val currentCoordsState: MutableState<Coords> = mutableStateOf(Coords(0.0, 0.0, 0.0))
+    private val currentCoordsErrorState: MutableState<Pair<Double, Double>> = mutableStateOf(Pair(0.0, 0.0))
+    private val trackingState: MutableState<Boolean> = mutableStateOf(false)
+    private val anchorCountState: MutableState<Int> = mutableIntStateOf(0)
+    private val anchorListState: MutableState<MutableList<Pair<Float, Coords>>> = mutableStateOf(mutableListOf())
+    private val stateState: MutableState<State> = mutableStateOf(State.UNINITIALIZED)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        sharedPreferences = getPreferences(MODE_PRIVATE)
+        enableEdgeToEdge()
 
         setContentView(R.layout.activity_main)
         surfaceView = findViewById(R.id.surfaceview)
-        geospatialPoseTextView = findViewById(R.id.geospatial_pose_view)
         statusTextView = findViewById(R.id.status_text_view)
-        tapScreenTextView = findViewById(R.id.tap_screen_text_view)
-        setAnchorButton = findViewById(R.id.set_anchor_button)
         clearAnchorsButton = findViewById(R.id.clear_anchors_button)
 
-        setAnchorButton.setOnClickListener(
-            View.OnClickListener { v ->
-                val popup = PopupMenu(this@GeospatialActivity, v)
-                popup.setOnMenuItemClickListener { item: MenuItem ->
-                    this@GeospatialActivity.settingsMenuClick(
-                        item
-                    )
-                }
-                popup.inflate(R.menu.setting_menu)
-                popup.show()
-                popup
-                    .menu
-                    .findItem(sharedPreferences!!.getInt(ANCHOR_MODE, R.id.geospatial))
-                    .setChecked(true)
-            })
-
-        clearAnchorsButton?.setOnClickListener(View.OnClickListener { view: View? -> handleClearAnchorsButton() })
-
-        streetscapeGeometrySwitch = findViewById(R.id.streetscape_geometry_switch)
-        // Initial terrain anchor mode is DISABLED.
-        streetscapeGeometrySwitch?.setChecked(false)
-        streetscapeGeometrySwitch?.setOnCheckedChangeListener(CompoundButton.OnCheckedChangeListener { button: CompoundButton, isChecked: Boolean ->
-            this.onRenderStreetscapeGeometryChanged(
-                button,
-                isChecked
-            )
-        })
-
-        displayRotationHelper = DisplayRotationHelper( /* activity= */this)
+        displayRotationHelper = DisplayRotationHelper( /* context = */this)
 
         // Set up renderer.
         render = SampleRender(surfaceView, this, assets)
@@ -298,12 +330,231 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
                         return true
                     }
                 })
-        surfaceView?.setOnTouchListener(OnTouchListener { v: View?, event: MotionEvent? ->
-            gestureDetector!!.onTouchEvent(
-                event!!
+//        surfaceView?.setOnTouchListener(OnTouchListener { v: View?, event: MotionEvent? ->
+//            gestureDetector!!.onTouchEvent(
+//                event!!
+//            )
+//        })
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+
+        findViewById<ComposeView>(R.id.my_composable).setContent {
+            val modifier = Modifier
+            MaterialTheme {
+                Surface(color = Color.Transparent,
+                modifier = modifier.fillMaxSize(),
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxSize()) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            SmallLocationIndicator(
+                                modifier,
+                                currentCoordsState.value,
+                                currentCoordsErrorState.value
+                            )
+                            Button(
+                                onClick = { geospatialViewModel.saveRoute(this@GeospatialActivity) },
+//                                modifier = modifier.padding(16.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.8f)),
+                            ) {
+                                Box(
+                                    Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.Red)
+                                )
+                            }
+                        }
+                        Box(Modifier.weight(1f))
+                        StatusView(trackingState.value, anchorCountState.value)
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun SmallLocationIndicator(modifier: Modifier, location: Coords, error: Pair<Double, Double>) {
+        Card(
+            modifier.padding(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.8f))
+//            colors = CardDefaults.cardColors(containerColor = Color.Transparent)
+        ) {
+            Column(Modifier.padding(vertical = 8.dp, horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Row(
+//                    Modifier.padding(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(String.format("%.7f", location.lat))
+                    Text(String.format("%.7f", location.lon))
+                    Text(String.format("%.3f", location.alt))
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val threshold = 1.0
+                    Text(String.format("%.2f", error.first)+"m", color = if (error.first > threshold) Color.Red else Color.Green)
+                    Text(String.format("%.2f", error.second)+"m", color = if (error.first > threshold) Color.Red else Color.Green)
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun LocationIndicator(modifier: Modifier, location: Coords) {
+        Box {
+            Box(modifier
+                .blur(2.dp)
+                .fillMaxSize()) {  }
+            Card(
+                modifier.padding(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White)
+            ) {
+
+                Column(Modifier.padding(16.dp)) {
+                    Text("Position", fontWeight = FontWeight.Bold)
+                    InfoLine("Lat", "", "${location.lat}", modifier)
+                    InfoLine("Lon", "0.87m", "${location.lon}", modifier)
+                    InfoLine("Alt", "1.3m", "${location.alt}", modifier)
+                    Spacer(modifier.height(1.dp))
+
+                    Text("Pose", fontWeight = FontWeight.Bold)
+                }
+            }
+
+        }
+    }
+
+    @Composable
+    fun InfoLine(descriptor: String, optional:String = "", data:String, modifier: Modifier) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(descriptor, fontWeight = FontWeight.Thin, modifier = modifier.weight(0.7f)) // Mas fino
+            Text(if (optional == "") "" else "($optional)", color = Color.Red, modifier = modifier.weight(0.5f))
+            Text(data, modifier = modifier.weight(0.5f))
+        }
+    }
+
+    @Composable
+    fun StatusView(localized: Boolean, setAnchorsCount:Int) {
+
+        var expanded by remember { mutableStateOf(false) }
+        // Animate the rotation angle based on the 'expanded' state
+
+
+        Card(
+            modifier = Modifier.padding(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.8f))
+        ) {
+            Column {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(vertical = 8.dp, horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(if (localized) Color.Green else Color.Red)
+                    )
+
+                    Text(when (stateState.value) {
+                        State.UNSUPPORTED ->  "Error"
+                        State.EARTH_STATE_ERROR -> "Error"
+                        State.LOCALIZING_FAILED -> "Error"
+
+                        State.UNINITIALIZED -> "Initializing ..."
+                        State.PRETRACKING ->  "Locating ..."
+                        State.LOCALIZING ->  "Searching ..."
+                        State.LOCALIZED -> "$setAnchorsCount / $MAXIMUM_ANCHORS Anchors"
+                        else -> "idk"
+                    })
+                    if (localized){
+                        Arrow(expanded, Modifier.clickable { expanded = !expanded })
+                    }
+
+                }
+                AnimatedVisibility(visible = expanded) {
+                    LazyColumn(Modifier.padding(16.dp))
+                    {
+                        items(anchorListState.value) { (distance, coords) ->
+
+                            // if (coords in anchorManager.setAnchors) colors = CardDefaults.cardColors(containerColor =  Color.Green.copy(alpha = 0.1f)
+//                            Card() {
+                                Row(verticalAlignment = Alignment.CenterVertically) { // TODO - Set stable distance width
+                                    if (coords in anchorManager.setAnchors)
+                                        Box(Modifier
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(Color.Black)
+                                        )
+                                    Text(
+                                        "${String.format("%.2f", distance)} m",
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(Modifier.width(16.dp))
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Text(String.format("%.7f", coords.lat))
+                                        Text(String.format("%.7f", coords.lon))
+                                        Text(String.format("%.3f", coords.alt))
+                                    }
+
+                                }
+//                            }
+
+                        }
+
+                    }
+
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun Arrow(expanded: Boolean, modifier: Modifier) {
+
+        val rotationAngle by animateFloatAsState(
+            targetValue = if (expanded) 0f else 180f, // 180 degrees when expanded, 0 when collapsed
+            animationSpec = tween(durationMillis = 300), // Smooth animation over 300ms
+            label = "arrowRotationAnimation"
+        )
+
+        Row(
+            modifier = modifier,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.KeyboardArrowDown, // The arrow icon
+                contentDescription = if (expanded) "Collapse" else "Expand",
+                modifier = Modifier.rotate(rotationAngle) // Apply the animated rotation
             )
-        })
-        fusedLocationClient = LocationServices.getFusedLocationProviderClient( /* context= */this)
+        }
+    }
+
+    @Preview
+    @Composable
+    fun indicator() {
+        Box(Modifier
+            .size(8.dp)
+            .clip(CircleShape)
+            .background(Color.Black)
+
+        )
+    }
+
+    override fun onResume() {
+        super.onResume()
+        createSession()
+
+        surfaceView.onResume()
+        displayRotationHelper!!.onResume()
+    }
+
+    public override fun onPause() {
+        super.onPause()
+        if (session != null) {
+            // Note that the order matters - GLSurfaceView is paused first so that it does not try
+            // to query the session. If Session is paused before GLSurfaceView, GLSurfaceView may
+            // still call session.update() and get a SessionPausedException.
+            displayRotationHelper!!.onPause()
+            surfaceView.onPause()
+            session!!.pause()
+        }
     }
 
     override fun onDestroy() {
@@ -317,23 +568,6 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
         }
 
         super.onDestroy()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        if (sharedPreferences!!.getBoolean(ALLOW_GEOSPATIAL_ACCESS_KEY,  /* defValue= */false)) {
-            createSession()
-        } else {
-            showPrivacyNoticeDialog()
-        }
-
-        surfaceView!!.onResume()
-        displayRotationHelper!!.onResume()
-    }
-
-    private fun showPrivacyNoticeDialog() {
-        val dialog: DialogFragment = PrivacyNoticeDialogFragment.createDialog()
-        dialog.show(supportFragmentManager, PrivacyNoticeDialogFragment::class.java.getName())
     }
 
     private fun createSession() {
@@ -465,27 +699,7 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
             session!!.checkVpsAvailabilityAsync(
                 latitude,
                 longitude
-            ) { availability: VpsAvailability? -> }
-    }
-
-    private fun showVpsNotAvailabilityNoticeDialog() {
-        val dialog: DialogFragment = VpsAvailabilityNoticeDialogFragment.createDialog()
-        dialog.show(
-            supportFragmentManager,
-            VpsAvailabilityNoticeDialogFragment::class.java.getName()
-        )
-    }
-
-    public override fun onPause() {
-        super.onPause()
-        if (session != null) {
-            // Note that the order matters - GLSurfaceView is paused first so that it does not try
-            // to query the session. If Session is paused before GLSurfaceView, GLSurfaceView may
-            // still call session.update() and get a SessionPausedException.
-            displayRotationHelper!!.onPause()
-            surfaceView!!.onPause()
-            session!!.pause()
-        }
+            ) { availability: VpsAvailability? -> Toast.makeText(this, "VPS is ${availability!!.name}", Toast.LENGTH_LONG).show()}
     }
 
     override fun onRequestPermissionsResult(
@@ -495,13 +709,10 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, results)
         if (!CameraPermissionHelper.hasCameraPermission(this)) {
-            // Use toast instead of snackbar here since the activity will exit.
+            // The activity will exit.
             Toast.makeText(
-                this,
-                "Camera permission is needed to run this application",
-                Toast.LENGTH_LONG
-            )
-                .show()
+                this, "Camera permission is required", Toast.LENGTH_LONG
+            ).show()
             if (!CameraPermissionHelper.shouldShowRequestPermissionRationale(this)) {
                 // Permission denied with checking "Do not ask again".
                 CameraPermissionHelper.launchPermissionSettings(this)
@@ -514,11 +725,8 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
         ) {
             // Use toast instead of snackbar here since the activity will exit.
             Toast.makeText(
-                this,
-                "Precise location permission is needed to run this application",
-                Toast.LENGTH_LONG
-            )
-                .show()
+                this, "Precise location permission is required", Toast.LENGTH_LONG
+            ).show()
             if (!LocationPermissionHelper.shouldShowRequestPermissionRationale(this)) {
                 // Permission denied with checking "Do not ask again".
                 LocationPermissionHelper.launchPermissionSettings(this)
@@ -529,14 +737,15 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        FullScreenHelper.setFullScreenOnWindowFocusChanged(this, hasFocus)
+//        FullScreenHelper.setFullScreenOnWindowFocusChanged(this, hasFocus)
     }
 
     override fun onSurfaceCreated(render: SampleRender) {
         // Prepare the rendering objects. This involves reading shaders and 3D model files, so may throw
         // an IOException.
         try {
-            planeRenderer = PlaneRenderer(render)
+            // TODO - Reactivate planeRenderer?
+//            planeRenderer = PlaneRenderer(render)
             backgroundRenderer = BackgroundRenderer(render)
             virtualSceneFramebuffer = Framebuffer(render,  /* width= */1,  /* height= */1)
 
@@ -544,13 +753,16 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
             val virtualObjectTexture =
                 Texture.createFromAsset(
                     render,  //              "models/spatial_marker_baked.png",
-                    "models/120.png",
+//                    "models/120.png",
+//                    "models/120 masterpiece.png",
+                    "models/120 masterpiece FINALLY.png",
                     Texture.WrapMode.CLAMP_TO_EDGE,
                     Texture.ColorFormat.SRGB
                 )
 
             //      virtualObjectMesh = Mesh.createFromAsset(render, "models/geospatial_marker.obj");
-            virtualObjectMesh = Mesh.createFromAsset(render, "models/center_size_ball.obj")
+//            virtualObjectMesh = Mesh.createFromAsset(render, "models/center_size_ball.obj")
+            virtualObjectMesh = Mesh.createFromAsset(render, "models/120 masterpiece full.obj")
             geospatialAnchorVirtualObjectShader =
                 Shader.createFromAssets(
                     render,
@@ -698,9 +910,11 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
             updateGeospatialState(earth)
         }
 
-        // Show a message based on whether tracking has failed, if planes are detected, and if the user
+        // Show a message based on whether tracking has failed,
+        // if planes are detected, and if the user
         // has placed any objects.
         var message: String? = null
+
         when (state) {
             State.UNINITIALIZED -> {}
             State.UNSUPPORTED -> message = resources.getString(R.string.status_unsupported)
@@ -720,21 +934,14 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
         if (message != null && lastStatusText !== message) {
             lastStatusText = message
             runOnUiThread {
-                statusTextView!!.visibility = View.VISIBLE
-                statusTextView!!.text = lastStatusText
-            }
-        }
-        synchronized(anchorsLock) {
-            if (anchorManager.sortedAnchors.size >= MAXIMUM_ANCHORS) {
-                runOnUiThread {
-                    setAnchorButton!!.visibility = View.INVISIBLE
-                    tapScreenTextView!!.visibility = View.INVISIBLE
-                }
+                stateState.value = state
+//                statusTextView!!.visibility = View.VISIBLE
+//                statusTextView!!.text = lastStatusText
             }
         }
 
         // Handle user input.
-        handleTap(frame, camera.trackingState)
+//        handleTap(frame, camera.trackingState)
 
         // -- Draw background
         if (frame.timestamp != 0L) {
@@ -746,8 +953,10 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
         // If not tracking, don't draw 3D objects.
         // TODO
         if (camera.trackingState != TrackingState.TRACKING || state != State.LOCALIZED) {
+            trackingState.value = false
             return
         }
+        trackingState.value = true
 
         // -- Draw virtual objects
 
@@ -767,12 +976,12 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
             render.draw(pointCloudMesh, pointCloudShader)
         }
         // Visualize planes.
-        planeRenderer!!.drawPlanes(
-            render,
-            session!!.getAllTrackables<Plane>(Plane::class.java),
-            camera.displayOrientedPose,
-            projectionMatrix
-        )
+//        planeRenderer?.drawPlanes(
+//            render,
+//            session!!.getAllTrackables<Plane>(Plane::class.java),
+//            camera.displayOrientedPose,
+//            projectionMatrix
+//        )
 
         // Visualize anchors created by touch.
         render.clear(virtualSceneFramebuffer, 0f, 0f, 0f, 0f)
@@ -825,32 +1034,16 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
         }
         render.clear(virtualSceneFramebuffer, 0f, 0f, 0f, 0f)
         synchronized(anchorsLock) {
-            // TODO - Update anchors related to location
 
-            // REMOVE ALL ANCHORS
+            // TODO - Do the anchorManager call inside the viewmodel (REFACTOR)
+            anchorManager.updateLocation(earth!!)
+            lifecycleScope.launch {
+                geospatialViewModel.addLocationToHistory(earth.getLocationCoords())
+            }
 
-            // 3 Places:
-            //  (1) The list,
-            //  (2) In ARCore need to call anchor.detach()
-            //  (3) Shared preferences - TODO
+            anchorListState.value = anchorManager.sortedLocations
 
-
-            // ADD CLOSEST ANCHORS
-
-            // Anchors do not have lat, lon, alt (need to be recalculated)
-            //  (a) Recalculate them
-            //      val geospatialPose = arSession.earth.getGeospatialPose(anchor.pose)
-            //      geospatialPose.latitude, geospatialPose.longitude, geospatialPose.altitude
-            //  (b) Have a different data structure lined to the anchors where I save lat, lon, alt
-
-
-            // session.earth.cameraGeospatialPose.latitude
-            anchorManager.onlyCloseAnchors(
-                earth?.cameraGeospatialPose!!.latitude,
-                earth.cameraGeospatialPose.longitude,
-                20.0, 20)
-
-            for ((_, _, anchor) in anchorManager.sortedAnchors) {
+            for ((_, anchor) in anchorManager.setAnchors) {
                 // Get the current pose of an Anchor in world space. The Anchor pose is updated
                 // during calls to session.update() as ARCore refines its estimate of the world.
                 // Only render resolved Terrain & Rooftop anchors and Geospatial anchors.
@@ -905,20 +1098,8 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
                     )
                 }
             }
-            if (!anchorManager.sortedAnchors.isEmpty()) {
-                val anchorMessage =
-                    resources
-                        .getQuantityString(
-                            R.plurals.status_anchors_set,
-                            anchorManager.sortedAnchors.size,
-                            anchorManager.sortedAnchors.size,
-                            MAXIMUM_ANCHORS
-                        )
-                runOnUiThread {
-                    statusTextView!!.visibility = View.VISIBLE
-                    statusTextView!!.text = anchorMessage
-                }
-            }
+            anchorCountState.value = anchorManager.anchorCount
+            Log.d("GeospatialActivity", "Anchor count = ${anchorManager.anchorCount}")
         }
 
         // Compose the virtual scene with the background.
@@ -980,6 +1161,7 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
 
     /** Change behavior depending on the current [State] of the application.  */
     private fun updateGeospatialState(earth: Earth) {
+        //TODO - Change stateState in here.
         if (earth.earthState != Earth.EarthState.ENABLED) {
             state = State.EARTH_STATE_ERROR
             return
@@ -1007,8 +1189,8 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
             state = State.LOCALIZING
             return
         }
-
-        runOnUiThread { geospatialPoseTextView!!.setText(R.string.geospatial_pose_not_tracking) }
+        // TODO
+//        runOnUiThread { geospatialPoseTextView!!.setText(R.string.geospatial_pose_not_tracking) }
     }
 
     /**
@@ -1027,19 +1209,19 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
         ) {
             state = State.LOCALIZED
             synchronized(anchorsLock) {
-                val anchorNum = anchorManager.sortedAnchors.size
-//                if (anchorNum == 0) {
-//                    createAnchorFromSharedPreferences(earth)
+                val anchorNum = anchorManager.anchorCount
+
+                // TODO - Set here the green color for localized
+//                trackingState.value = true
+
+
+//                if (anchorNum < MAXIMUM_ANCHORS) {
+//                    runOnUiThread {
+//                        if (anchorNum > 0) {
+//                            clearAnchorsButton!!.visibility = View.VISIBLE
+//                        }
+//                    }
 //                }
-                if (anchorNum < MAXIMUM_ANCHORS) {
-                    runOnUiThread {
-                        setAnchorButton!!.visibility = View.VISIBLE
-                        tapScreenTextView!!.visibility = View.VISIBLE
-                        if (anchorNum > 0) {
-                            clearAnchorsButton!!.visibility = View.VISIBLE
-                        }
-                    }
-                }
             }
             return
         }
@@ -1074,8 +1256,6 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
             state = State.LOCALIZING
             localizingStartTimestamp = System.currentTimeMillis()
             runOnUiThread {
-                setAnchorButton!!.visibility = View.INVISIBLE
-                tapScreenTextView!!.visibility = View.INVISIBLE
                 clearAnchorsButton!!.visibility = View.INVISIBLE
             }
             return
@@ -1088,23 +1268,27 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
 
     private fun updateGeospatialPoseText(geospatialPose: GeospatialPose) {
         val quaternion = geospatialPose.eastUpSouthQuaternion
-        val poseText =
-            resources
-                .getString(
-                    R.string.geospatial_pose,
-                    geospatialPose.latitude,
-                    geospatialPose.longitude,
-                    geospatialPose.horizontalAccuracy,
-                    geospatialPose.altitude,
-                    geospatialPose.verticalAccuracy,
-                    quaternion[0],
-                    quaternion[1],
-                    quaternion[2],
-                    quaternion[3],
-                    geospatialPose.orientationYawAccuracy
-                )
+//        val poseText =
+//            resources
+//                .getString(
+//                    R.string.geospatial_pose,
+//                    geospatialPose.latitude,
+//                    geospatialPose.longitude,
+//                    geospatialPose.horizontalAccuracy,
+//                    geospatialPose.altitude,
+//                    geospatialPose.verticalAccuracy,
+//                    quaternion[0],
+//                    quaternion[1],
+//                    quaternion[2],
+//                    quaternion[3],
+//                    geospatialPose.orientationYawAccuracy
+//                )
         runOnUiThread {
-            geospatialPoseTextView!!.text = poseText
+            // TODO
+//            geospatialPoseTextView!!.text = poseText
+            currentCoordsState.value = Coords(geospatialPose.latitude, geospatialPose.longitude, geospatialPose.altitude)
+            currentCoordsErrorState.value = Pair(geospatialPose.horizontalAccuracy, geospatialPose.verticalAccuracy)
+//            anchorManager.updateLocation(earth?)
         }
     }
 
@@ -1119,35 +1303,6 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
         return (mapDistance - 2).toFloat() / (20 - 2) + 1
     }
 
-    /**
-     * Handles the button that creates an anchor.
-     *
-     *
-     * Ensure Earth is in the proper state, then create the anchor. Persist the parameters used to
-     * create the anchors so that the anchors will be loaded next time the app is launched.
-     */
-    private fun handleSetAnchorButton() {}
-
-    /** Menu button to choose anchor type.  */
-    protected fun settingsMenuClick(item: MenuItem): Boolean {
-        val itemId = item.itemId
-        if (itemId == R.id.anchor_reset) {
-            return true
-        }
-        item.setChecked(!item.isChecked)
-        sharedPreferences!!.edit().putInt(ANCHOR_MODE, itemId).commit()
-        if (itemId == R.id.geospatial) {
-            anchorType = AnchorType.GEOSPATIAL
-            return true
-        } else if (itemId == R.id.terrain) {
-            anchorType = AnchorType.TERRAIN
-            return true
-        } else if (itemId == R.id.rooftop) {
-            anchorType = AnchorType.ROOFTOP
-            return true
-        }
-        return false
-    }
 
     /** Creates anchor with the provided GeospatialPose, either from camera or HitResult.  */
     private fun createAnchorWithGeospatialPose(earth: Earth, geospatialPose: GeospatialPose) {
@@ -1155,22 +1310,6 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
         val longitude = geospatialPose.longitude
         val altitude = geospatialPose.altitude
         val quaternion = geospatialPose.eastUpSouthQuaternion
-//        when (anchorType) {
-//            AnchorType.TERRAIN -> {
-//                createTerrainAnchor(earth, latitude, longitude, identityQuaternion)
-//                storeAnchorParameters(latitude, longitude, 0.0, identityQuaternion)
-//            }
-//
-//            AnchorType.GEOSPATIAL -> {
-//
-//                storeAnchorParameters(latitude, longitude, altitude, quaternion)
-//            }
-//
-//            AnchorType.ROOFTOP -> {
-//                createRooftopAnchor(earth, latitude, longitude, identityQuaternion)
-//                storeAnchorParameters(latitude, longitude, 0.0, identityQuaternion)
-//            }
-//        }
         createAnchor(earth, latitude, longitude, altitude, quaternion)
         runOnUiThread {
             clearAnchorsButton!!.visibility = View.VISIBLE
@@ -1185,7 +1324,7 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
      */
     private fun handleClearAnchorsButton() {
         synchronized(anchorsLock) {
-            clearedAnchorsAmount = anchorManager.sortedAnchors.size
+            clearedAnchorsAmount = anchorManager.anchorCount
             val message =
                 resources
                     .getQuantityString(
@@ -1200,15 +1339,9 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
             anchorManager.removeAllAnchors()
         }
         clearAnchorsButton!!.visibility = View.INVISIBLE
-        setAnchorButton!!.visibility = View.VISIBLE
-        tapScreenTextView!!.visibility = View.VISIBLE
     }
 
-    private fun clearAnchorsFromSharedPreferences() {
-        val editor = sharedPreferences!!.edit()
-        editor.putStringSet(SHARED_PREFERENCES_SAVED_ANCHORS, null)
-        editor.commit()
-    }
+
 
     /** Create an anchor at a specific geodetic location using a EUS quaternion.  */
     private fun createAnchor(
@@ -1222,7 +1355,7 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
         )
 
         synchronized(anchorsLock) {
-            anchorManager.setLocationAsAnchor(
+            anchorManager.setNewLocationAsAnchor(
                 Coords(latitude,
                 longitude,
                 altitude),
@@ -1232,74 +1365,6 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
                 quaternion[2],
                 quaternion[3])
         }
-    }
-
-//    //  private String anchorDescription(Anchor anchor) {
-//    //    return anchor.getPose().
-//    //  }
-//    /** Create a terrain anchor at a specific geodetic location using a EUS quaternion.  */
-//    private fun createTerrainAnchor(
-//        earth: Earth, latitude: Double, longitude: Double, quaternion: FloatArray
-//    ) {
-//        val future =
-//            earth.resolveAnchorOnTerrainAsync(
-//                latitude,
-//                longitude,  /* altitudeAboveTerrain= */
-//                0.0,
-//                quaternion[0],
-//                quaternion[1],
-//                quaternion[2],
-//                quaternion[3]
-//            ) { anchor: Anchor, state: TerrainAnchorState ->
-//                if (state == TerrainAnchorState.SUCCESS) {
-//                    synchronized(anchorsLock) {
-//                        anchors.add(anchor)
-//                        terrainAnchors.add(anchor)
-//                    }
-//                } else {
-//                    statusTextView!!.visibility = View.VISIBLE
-//                    statusTextView!!.text = getString(R.string.status_terrain_anchor, state)
-//                }
-//            }
-//    }
-//
-//    /** Create a rooftop anchor at a specific geodetic location using a EUS quaternion.  */
-//    private fun createRooftopAnchor(
-//        earth: Earth, latitude: Double, longitude: Double, quaternion: FloatArray
-//    ) {
-//        val future =
-//            earth.resolveAnchorOnRooftopAsync(
-//                latitude,
-//                longitude,  /* altitudeAboveRooftop= */
-//                0.0,
-//                quaternion[0],
-//                quaternion[1],
-//                quaternion[2],
-//                quaternion[3]
-//            ) { anchor: Anchor, state: RooftopAnchorState ->
-//                if (state == RooftopAnchorState.SUCCESS) {
-//                    synchronized(anchorsLock) {
-//                        anchors.add(anchor)
-//                        rooftopAnchors.add(anchor)
-//                    }
-//                } else {
-//                    statusTextView!!.visibility = View.VISIBLE
-//                    statusTextView!!.text = getString(R.string.status_rooftop_anchor, state)
-//                }
-//            }
-//    }
-
-
-
-    override fun onDialogPositiveClick(dialog: DialogFragment) {
-        if (!sharedPreferences!!.edit().putBoolean(ALLOW_GEOSPATIAL_ACCESS_KEY, true).commit()) {
-            throw AssertionError("Could not save the user preference to SharedPreferences!")
-        }
-        createSession()
-    }
-
-    override fun onDialogContinueClick(dialog: DialogFragment) {
-        dialog.dismiss()
     }
 
     private fun onRenderStreetscapeGeometryChanged(button: CompoundButton, isChecked: Boolean) {
@@ -1323,7 +1388,7 @@ class GeospatialActivity : AppCompatActivity(), SampleRender.Renderer,
         // compared to frame rate.
         synchronized(singleTapLock) {
             synchronized(anchorsLock) {
-                if (queuedSingleTap == null || anchorManager.sortedAnchors.size >= MAXIMUM_ANCHORS || cameraTrackingState != TrackingState.TRACKING) {
+                if (queuedSingleTap == null || anchorManager.anchorCount >= MAXIMUM_ANCHORS || cameraTrackingState != TrackingState.TRACKING) {
                     queuedSingleTap = null
                     return
                 }

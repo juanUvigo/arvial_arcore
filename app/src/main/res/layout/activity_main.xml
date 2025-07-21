@@ -18,29 +18,28 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:fitsSystemWindows="true"
     tools:context="ar.core.ARVIAL.geospatial.GeospatialActivity">
 
   <android.opengl.GLSurfaceView
       android:id="@+id/surfaceview"
       android:layout_width="fill_parent"
-      android:layout_height="fill_parent"
+      android:layout_height="wrap_content"
+
       android:layout_gravity="top"/>
+
+  <androidx.compose.ui.platform.ComposeView
+      android:id="@+id/my_composable"
+      android:layout_width="match_parent"
+      android:layout_height="match_parent" />
 
   <TextView
       android:id="@+id/status_text_view"
       android:layout_width="fill_parent"
-      android:layout_height="150dp"
+      android:layout_height="0dp"
+      android:visibility="gone"
       android:layout_alignParentStart="true"
       android:layout_alignParentBottom="true"
-      android:padding="20dp"
-      android:textColor="#ffffff"
-      android:background="#bf323232"/>
-
-  <TextView
-      android:id="@+id/geospatial_pose_view"
-      android:layout_width="fill_parent"
-      android:layout_height="wrap_content"
-      android:layout_gravity="top"
       android:padding="20dp"
       android:textColor="#ffffff"
       android:background="#bf323232"/>
@@ -54,27 +53,6 @@
       android:visibility="gone"
       android:text="@string/tap_screen_text"
       android:textColor="#ffffff"/>
-
-  <Button
-      android:id="@+id/set_anchor_button"
-      android:layout_width="wrap_content"
-      android:layout_height="wrap_content"
-      android:layout_above="@+id/streetscape_geometry_switch"
-      android:text="@string/button_text_set_anchor"
-      android:drawableRight="@drawable/ic_settings_white"
-      android:layout_alignParentRight="true"
-      android:visibility="invisible"/>
-
-  <Switch
-      android:id="@+id/streetscape_geometry_switch"
-      android:layout_width="wrap_content"
-      android:layout_height="wrap_content"
-      android:text="@string/switch_render_streetscaope_geometry"
-      android:layout_alignParentRight="true"
-      android:layout_alignParentBottom="true"
-      android:padding="10dp"
-      android:textOff="Off"
-      android:textOn="On" />
 
   <Button
       android:id="@+id/clear_anchors_button"

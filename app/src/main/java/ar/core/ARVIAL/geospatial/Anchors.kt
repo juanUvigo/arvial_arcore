@@ -4,29 +4,81 @@ import com.google.ar.core.Anchor
 import com.google.ar.core.Earth
 import android.location.Location
 
-data class Coords(val lat: Double, val lon: Double, val alt: Double = 0.0)
+data class Coords(val lat: Double, val lon: Double, val alt: Double = 0.0) {
+
+    // decimal positions: 5 - m, 6 - dcm, 7 - cm,
+    fun similar(second:Coords):Boolean = // TODO - Use an actual method to compare distances
+        ((lat - second.lat) < 1e-6 && (lon - second.lon) < 1e-6)
+
+    override fun equals(other: Any?): Boolean {
+        return super.equals(other)
+    }
+}
 
 class AnchorManager() {
 
-    val locations = mutableListOf<Coords>(
-        Coords(42.17013358337541,
-            -8.690065687532542,
-            486.0568971633911,),
-        Coords(42.1701106557642,
-            -8.69011710945671,
-            482.90340614225715,),
-        Coords(42.1700512263000,
-            -8.69009029365590,
-            483.3349350588396,),
-        Coords(42.170015513340,
-            -8.69007610270367,
-            483.68724593892694),
+    private var currentLocation: Coords = Coords(0.0,0.0,0.0)
+
+    // ,[^,]+,[^,]+,[^,]+,[^,]+$
+    private val locations = mutableSetOf<Coords>(
+
+        // Clavo Geográfico
+        Coords(42.170408, -8.690083, 489.257),
+
+        // Prueba
+//        Coords(42.1701425,-8.6900235,480.482),
+
+        // CUVI
+        Coords(42.1731869083463,-8.6830147626072,481.112+55.89),
+        Coords(42.1732383701162,-8.68368018160083,485.027+55.89),
+        Coords(42.1732388115965,-8.68369984214693,485.046+55.89),
+        Coords(42.173243178603,-8.68370271410511,485.105+55.89),
+        Coords(42.1732883822679,-8.68409519926036,486.514+55.89),
+        Coords(42.1733972969866,-8.68478957482758,487.502+55.89),
+        Coords(42.1735280371342,-8.68488921337041,487.33+55.89),
+        Coords(42.1734850789171,-8.68465401758511,487.232+55.89),
+        Coords(42.17335759703,-8.68371954266698,484.867+55.89),
+        Coords(42.1732986425393,-8.68300209706323,480.54+55.89),
+        Coords(42.1732241029113,-8.68249950750089,478.488+55.89),
+        Coords(42.1731847696398,-8.68235547859271,478.096+55.89),
+        Coords(42.1731835605757,-8.68221158591785,477.713+55.89),
+        Coords(42.1732339594044,-8.682201514356,477.443+55.89),
+        Coords(42.1732752226418,-8.68233340179841,477.76+55.89),
+
+        // Camelias
+        Coords(42.2311217627149,-8.72985150101623,65.346),
+        Coords(42.2311760135509,-8.72980430981664,65.55),
+        Coords(42.2312711755903,-8.72979349399482,65.21),
+        Coords(42.2339823412677,-8.72837573760695,68.062),
+        Coords(42.2342316402304,-8.72814210005064,67.897),
+        Coords(42.2344913646164,-8.72775142235393,67.729),
+        Coords(42.234642158594,-8.72730853965704,68.338),
+        Coords(42.234883989479,-8.72658342605594,67.857),
+        Coords(42.2348211329225,-8.726095759377,68.059),
+        Coords(42.2346965083099,-8.72596562746194,69.353),
+        Coords(42.2346319943028,-8.72556926497173,69.312),
+        Coords(42.2346475540486,-8.72543247931381,68.144),
+        Coords(42.2345741015626,-8.7252305504234,67.549),
+        Coords(42.2348708774798,-8.72550168252043,68.475),
+        Coords(42.2349565649961,-8.7257772577404,68.148),
+        Coords(42.2350064577754,-8.72610433843504,67.598),
+        Coords(42.2350279545294,-8.7268554065454,67.48),
+        Coords(42.2350047646813,-8.72692027264875,67.472),
+        Coords(42.2347635353747,-8.72750519912717,67.611),
+        Coords(42.2346565967747,-8.72771465716651,67.611),
+        Coords(42.2345156247841,-8.72797042313881,67.762),
+        Coords(42.2309653788007,-8.73006631624479,65.391),
+        Coords(42.2308873136656,-8.73009753922418,65.256),
     )
+
+    // Distance, coords
+    var sortedLocations = mutableListOf<Pair<Float, Coords>>()
 
     // Locations which has been registered in ARCore as anchors
     val setAnchors = HashMap<Coords, Anchor>()
-
-    val sortedAnchors = mutableListOf<Triple<Float, Coords, Anchor>>()
+    // val sortedAnchors = mutableListOf<Triple<Float, Coords, Anchor>>()
+    val anchorCount: Int
+        get() = setAnchors.size
 
     /**
      *  42.1701106557642, -8.69011710945671, 482.90340614225715, -5.6318515E-7, -0.99999875, -2.6531606E-7, 0.0015692402
@@ -44,6 +96,18 @@ class AnchorManager() {
      *       42.17015175385782, -8.690145197547649, 481.2356068370864, -0.0023454486, -0.9689849, 0.0039259274, 0.2470777
      *       42.17012034075145, -8.690119788548191, 480.97379315830767, -0.001554518, -0.97040594, 0.0028792603, 0.24145734
      *       42.17009501029836, -8.6900889612762, 481.3844555625692, 2.1813037E-6, -0.9635425, 4.068536E-5, 0.2675552
+     *
+     * Clavo geográfico (minas aparcamiento atrás)
+     * 42.170408, -8.690083, 489,257m (433,367m egm96 + 55.89m)
+     *     //        val anchor10 = earth.createAnchor(
+     *     //            42.170408,
+     *     //            -8.690083,
+     *     //            489.257,
+     *     //            -5.6318515E-7f,
+     *     //            -0.99999875f,
+     *     //            -2.6531606E-7f,
+     *     //            0.0015692402f
+     *     //        )
      */
 
 
@@ -52,51 +116,56 @@ class AnchorManager() {
     //      -0.36064374f,
     //      -1.4483432E-7f,
     //      0.9327036f
-    val defaultQuaternion = floatArrayOf(5.6225293E-8f, -0.36064374f, -1.4483432E-7f, 0.9327036f)
+    private val defaultQuaternion = floatArrayOf(5.6225293E-8f, -0.36064374f, -1.4483432E-7f, 0.9327036f)
     private val identityQuaternion = floatArrayOf(0f, 0f, 0f, 1f)
 
-    // Para añadir una anchor a ARCore
-    //      earth.createAnchor(lat, lon, alt, qx, qy, qz, qw)
-    //  e.g.
-    //        val anchorX = earth.createAnchor(
-    //            42.1701106557642,
-    //            -8.69011710945671,
-    //            482.90340614225715,
-    //            -5.6318515E-7f,
-    //            -0.99999875f,
-    //            -2.6531606E-7f,
-    //            0.0015692402f
-    //        )
-    //  Clavo geográfico (minas aparcamiento atrás)
-    //  42.170408, -8.690083, 489,257m (433,367m egm96 + 55.89m)
-    //        val anchor10 = earth.createAnchor(
-    //            42.170408,
-    //            -8.690083,
-    //            489.257,
-    //            -5.6318515E-7f,
-    //            -0.99999875f,
-    //            -2.6531606E-7f,
-    //            0.0015692402f
-    //        )
-    fun setLocationAsAnchor(location:Coords, earth: Earth) {
-        val anchor = earth.createAnchor(location.lat, location.lon, location.alt,
-            defaultQuaternion[0],defaultQuaternion[1],defaultQuaternion[2],defaultQuaternion[3])
-        setAnchors[location] = anchor
+    /**
+     * Sets new location
+     * update location coordinate list???
+     */
+    fun updateLocation(earth: Earth) {
+        val newLocation = earth.getLocationCoords()
+        if(!newLocation.similar(currentLocation)) {
+            currentLocation = newLocation
+            setMostAdequateAnchors(earth.getLocationCoords(), earth, MAX_ANCHOR_COUNT, maxDistance = 50.0)
+        }
     }
 
-    fun setLocationAsAnchor(location:Coords, earth: Earth, qx:Float, qy:Float, qz:Float, qw:Float) {
+    /**
+     * Añade una location como anchor a ARCore
+     */
+    private fun setLocationAsAnchor(location:Coords, earth: Earth) {
+        if (location !in locations) locations.add(location) // New location
+        if (anchorCount >= MAX_ANCHOR_COUNT) {
+            // TODO - Too many anchors
+            setMostAdequateAnchors(earth.getLocationCoords(), earth, MAX_ANCHOR_COUNT)
+        }
+        val anchor = earth.createAnchor(
+            location.lat,
+            location.lon,
+            location.alt,
+            defaultQuaternion[0],
+            defaultQuaternion[1],
+            defaultQuaternion[2],
+            defaultQuaternion[3]
+        )
+        setAnchors[location] = anchor
+
+    }
+
+    fun setNewLocationAsAnchor(location:Coords, earth: Earth, qx:Float, qy:Float, qz:Float, qw:Float) {
         val anchor = earth.createAnchor(location.lat, location.lon, location.alt,
             qx, qy, qz, qw)
         setAnchors[location] = anchor
     }
 
-    // Para quitar un anchor de ARCore
-    //      anchor.detach()
-    fun removeLocationAsAnchor(location:Coords) {
+    /**
+     * Elimina anchor de ARCore
+     */
+    private fun removeLocationAsAnchor(location:Coords) {
         val anchor = setAnchors[location]
         anchor?.detach()
         setAnchors.remove(location)
-
     }
 
     fun removeAllAnchors() {
@@ -104,78 +173,103 @@ class AnchorManager() {
             anchor.detach()
         }
         setAnchors.clear()
-        sortedAnchors.clear()
     }
 
-    fun sortAnchors(currenLat: Double, currentLon:Double) {
+
+    private fun sortLocations(currentCoord: Coords): List<Pair<Float, Coords>> {
 
         // Get all the distances between current position and every anchor.
         // Distance, Coords (lat, lon, alt), ARCore Anchor
-        var distanceList = mutableListOf<Triple<Float, Coords, Anchor>>()
-        setAnchors.forEach{(coords, anchor) ->
-            distanceList.add(Triple(calculateDistance(currenLat, currentLon, coords.lat, coords.lon), coords, anchor))
+        val distanceList = mutableListOf<Pair<Float, Coords>>()
+        locations.forEach{coords ->
+            distanceList.add(
+                Pair(
+                    distanceBetweenCoords(currentCoord, coords),
+                    coords
+                )
+            )
         }
 
         // Sort from closest to furthest away
-        val closestToFurthestAwayAnchors = distanceList.sortedWith { a1, a2 ->
+        val closestToFurthestAwayLocation = distanceList.sortedWith { a1, a2 ->
             a1.first.compareTo(a2.first)
         }
-        sortedAnchors.clear()
-        sortedAnchors.addAll(closestToFurthestAwayAnchors)
+
+        sortedLocations = closestToFurthestAwayLocation.toMutableList()
+
+        return closestToFurthestAwayLocation
     }
 
     /**
-     * Returns distance between 2 coords in meters
+     * Returns distance between 2 WSG84 coords in meters
      * lat1, lon1 : Coords1
      * lat2, lon2 : Coords2
      */
-    fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Float {
+    private fun distanceBetweenCoords(coords1: Coords, coords2: Coords): Float {
         val startPoint = Location("startPoint").apply {
-            latitude = lat1
-            longitude = lon1
+            latitude = coords1.lat
+            longitude = coords1.lon
+            altitude = coords1.alt
         }
 
         val endPoint = Location("endPoint").apply {
-            latitude = lat2
-            longitude = lon2
+            latitude = coords2.lat
+            longitude = coords2.lon
+            altitude = coords2.alt
         }
 
         return startPoint.distanceTo(endPoint) // Distance in meters
     }
 
-    fun onlyCloseAnchors(
-        currenLat:Double,
-        currentLon: Double,
-        maxDistance: Double,
-        maxAmmount: Int
+    /**
+     * Order full list of locations and set as many as possible by proximity
+     * max: ammout | distance
+     */
+    private fun setMostAdequateAnchors(
+        currentCoords: Coords,
+        earth: Earth,
+        maxAmmount: Int,
+        maxDistance: Double = Double.MAX_VALUE
     ) {
 
         // Generate the list of sorted anchors
-//        sortAnchors(currenLat, currentLon)
+        val sortedLocations = sortLocations(currentCoords)
 
-        // Remove excess elements
-        var count = 0
-        val removeIndexes = mutableListOf<Int>()
-        for(i in sortedAnchors.indices) {
-            val (distance, coord, anchor) = sortedAnchors[i]
-            if (distance > maxDistance || count >= maxAmmount) // The list is too big already
-                removeIndexes.add(i)
-                removeLocationAsAnchor(coord)
+        // Find which anchors are within the max distance set
+        val locationsToBeAdded: MutableSet<Coords> = mutableSetOf()
+        val trimmedSortedLocations = sortedLocations.slice(0..maxAmmount)
+        for((distance, location) in trimmedSortedLocations) {
+            if (distance > maxDistance) break  // The list is too big already
+
+            locationsToBeAdded.add(location)
         }
 
-        // Remove from this list too
-        for (index in removeIndexes) {
-            sortedAnchors.removeAt(index)
+        // Remove far away anchors
+        val locationsToBeRemoved = mutableSetOf<Coords>()
+        setAnchors.forEach { (coords, anchor) ->
+            if (coords !in locationsToBeAdded) locationsToBeRemoved.add(coords)
         }
+        locationsToBeRemoved.forEach { coords -> removeLocationAsAnchor(coords) }
+
+        // Add missing close anchors
+        locationsToBeAdded.forEach { coords ->
+            if (coords !in setAnchors) setLocationAsAnchor(coords, earth)
+        }
+
     }
 
     fun anchorAllLocations(earth: Earth) {
-        for (location in locations) {
-            setLocationAsAnchor(location, earth)
-        }
+        updateLocation(earth)
+//        setMostAdequateAnchors(earth.getLocationCoords(), earth, maxAmmount = MAX_ANCHOR_COUNT)
+    }
+
+    companion object {
+        const val MAX_ANCHOR_COUNT = 20
     }
 }
 
+fun Earth.getLocationCoords(): Coords =
+    Coords(this.cameraGeospatialPose.latitude, this.cameraGeospatialPose.longitude, this.cameraGeospatialPose.altitude)
 
 
 

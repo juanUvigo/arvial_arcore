@@ -86,4 +86,10 @@ class LocationsProvider(var sharedPreferences: SharedPreferences) {
 //            }
         }
     }
+
+    private fun clearAnchorsFromSharedPreferences() {
+        val editor = sharedPreferences!!.edit()
+        editor.putStringSet(SHARED_PREFERENCES_SAVED_ANCHORS, null)
+        editor.commit()
+    }
 }
