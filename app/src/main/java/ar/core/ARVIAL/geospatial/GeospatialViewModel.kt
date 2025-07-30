@@ -8,12 +8,18 @@ import android.widget.Toast
 import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
+import java.nio.charset.StandardCharsets
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Locale
+
 
 class GeospatialViewModel: ViewModel() {
 
@@ -42,14 +48,75 @@ class GeospatialViewModel: ViewModel() {
 //        }
 
         var csvText = ""
-        synchronized(lockLocation) {
-            for (historyEntry in locationHistory) {
-                val time = historyEntry.first
-                val location = historyEntry.second
-                csvText += "${location.lat}, ${location.lon}, ${location.alt}\n"
+        viewModelScope.launch(Dispatchers.IO) {
+            synchronized(lockLocation) {
+                for (historyEntry in locationHistory) {
+                    val time = historyEntry.first
+                    val location = historyEntry.second
+                    csvText += "${location.lat}, ${location.lon}, ${location.alt}\n"
+                }
+    //            shareCsvFile(context, csvText, fileName = LocalDateTime.now().format(formatterES))
+    //            TODO - Uncomment when done testing
+    //            locationHistory.clear()
             }
-            shareCsvFile(context, csvText, fileName = LocalDateTime.now().format(formatterES))
-//            locationHistory.clear()
+
+            saveCsvToInternalStorage(
+                context,
+                csvText,
+                fileName = LocalDateTime.now().format(formatterES)
+            )
+        }
+    }
+
+    private suspend fun saveCsvToInternalStorage(context: Context, csvString: String, fileName: String) {
+        val file = File(
+            context.filesDir,
+            fileName
+        ) // getFilesDir() points to your app's internal storage directory
+        try {
+            withContext(Dispatchers.IO) {
+                FileOutputStream(file).use { fos ->
+                    fos.write(csvString.toByteArray(StandardCharsets.UTF_8))
+                    Log.d("FileSaver", "CSV file saved to internal storage: " + file.absolutePath)
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "CSV $fileName saved", Toast.LENGTH_SHORT).show()
+                    }
+
+                }
+            }
+        } catch (e: IOException) {
+            Log.e("FileSaver", "Error saving CSV to internal storage: " + e.message)
+//            return false
+        }
+    }
+
+    fun saveCsvToFile(context: Context, csvContent: String, fileName: String): Boolean {
+        // Get the directory for your app's private files on the internal storage.
+        // This directory is specific to your app and is automatically created.
+        // Files saved here are not accessible by other apps.
+        val filesDir: File = context.filesDir
+
+        // Create a File object for the specified file name within the app's internal storage.
+        val file = File(filesDir, fileName)
+
+        try {
+            // Write the CSV content to the file.
+            // writeText handles opening, writing, and closing the file automatically.
+            file.writeText(csvContent)
+            // Log a success message. In a real Android app, you might use Log.d()
+            // For simplicity, using println here.
+            println("CSV content successfully saved to: ${file.absolutePath}")
+            return true
+        } catch (e: IOException) {
+            // Catch any IO exceptions that might occur during file writing (e.g., disk full).
+            System.err.println("Error saving CSV to file: ${e.message}")
+            e.printStackTrace()
+            return false
+        } catch (e: SecurityException) {
+            // This catch block is less likely for internal storage but good for robustness.
+            System.err.println("Security error saving CSV to file: ${e.message}. Check app permissions if writing to external storage.")
+            e.printStackTrace()
+            return false
         }
     }
 
